@@ -1,0 +1,24 @@
+YO JERRY!
+
+SERVER "127.0.0.1:9413" {
+    ROUTE "/" {
+        SERVE 200 "I'm out there Jerry and I'm loving every minute of it!"
+    }
+    
+    ROUTE "/health" {
+        SERVE 200 "Giddy up!"
+    }
+    
+    ROUTE "/kramer" {
+        SERVE 200 "Master of your domain!"
+    }
+    
+    ROUTE "/serenity" {
+        SERVE 200 "Serenity now!"
+    }
+}
+
+"These pretzels are making me thirsty!" LOG
+"Hello Newman!" LOG
+
+NOINE!
