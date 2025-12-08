@@ -31,6 +31,9 @@
 #define BUFFER_SIZE 8192
 #define MAX_TOKENS 1024
 #define TOKEN_VALUE_LEN 512
+#define MAX_BITS 64
+#define MAX_BIT_NAME 64
+#define MAX_BIT_BODY 2048
 
 /* Token types */
 typedef enum {
@@ -42,6 +45,7 @@ typedef enum {
     TOKEN_RBRACE,
     TOKEN_LOG,
     TOKEN_SLIDE_IN,
+    TOKEN_BIT_START,
     TOKEN_EOF
 } TokenType;
 
@@ -57,10 +61,17 @@ typedef struct {
 } Route;
 
 typedef struct {
+    char name[MAX_BIT_NAME];
+    char body[MAX_BIT_BODY];
+} Bit;
+
+typedef struct {
     char host[256];
     int port;
     Route routes[MAX_ROUTES];
     int route_count;
+    Bit bits[MAX_BITS];
+    int bit_count;
     char logs[MAX_LOG_MESSAGES][MAX_LOG_LENGTH];
     int log_count;
 } Program;
@@ -124,6 +135,66 @@ int string_contains(const char *str, const char *substr) {
 void print_random_quote(void) {
     srand((unsigned int)time(NULL));
     printf("%s\n", kramer_quotes[rand() % num_quotes]);
+}
+
+/* Bit (function) management */
+const char *get_bit(const char *name) {
+    if (!g_program) return NULL;
+    
+    for (int i = 0; i < g_program->bit_count; i++) {
+        if (strcmp(g_program->bits[i].name, name) == 0) {
+            return g_program->bits[i].body;
+        }
+    }
+    return NULL;
+}
+
+/* Expand bit calls in response body */
+void expand_bits(char *input, char *output, size_t out_size) {
+    size_t in_pos = 0;
+    size_t out_pos = 0;
+    size_t in_len = strlen(input);
+    
+    while (in_pos < in_len && out_pos < out_size - 1) {
+        /* Look for {{BIT_NAME}} pattern */
+        if (input[in_pos] == '{' && in_pos + 1 < in_len && input[in_pos + 1] == '{') {
+            size_t bit_start = in_pos + 2;
+            size_t bit_pos = bit_start;
+            
+            /* Find closing }} */
+            while (bit_pos + 1 < in_len && !(input[bit_pos] == '}' && input[bit_pos + 1] == '}')) {
+                bit_pos++;
+            }
+            
+            if (bit_pos + 1 < in_len && input[bit_pos] == '}' && input[bit_pos + 1] == '}') {
+                /* Extract bit name */
+                char bit_name[MAX_BIT_NAME] = {0};
+                size_t name_len = bit_pos - bit_start;
+                if (name_len < MAX_BIT_NAME) {
+                    strncpy(bit_name, input + bit_start, name_len);
+                    bit_name[name_len] = '\0';
+                    
+                    /* Get bit content */
+                    const char *bit_content = get_bit(bit_name);
+                    if (bit_content) {
+                        size_t content_len = strlen(bit_content);
+                        if (out_pos + content_len < out_size - 1) {
+                            strcpy(output + out_pos, bit_content);
+                            out_pos += content_len;
+                        }
+                    }
+                    
+                    in_pos = bit_pos + 2;
+                    continue;
+                }
+            }
+        }
+        
+        /* Regular character */
+        output[out_pos++] = input[in_pos++];
+    }
+    
+    output[out_pos] = '\0';
 }
 
 /* Lexer */
@@ -253,6 +324,56 @@ int parse_program(const char *source, Program *prog) {
         fprintf(stderr, "Error: Program must start with 'YO JERRY!'\n");
         lexer_free(lex);
         return 0;
+    }
+    
+    /* Parse BIT definitions */
+    while (lex->pos < lex->length) {
+        lexer_skip_whitespace(lex);
+        
+        /* Peek ahead to see if this is a BIT definition */
+        size_t saved_pos = lex->pos;
+        if (!lexer_match(lex, "BIT", temp)) {
+            lex->pos = saved_pos;
+            break;
+        }
+        
+        lexer_skip_whitespace(lex);
+        char bit_name[MAX_BIT_NAME];
+        if (!lexer_match_pattern(lex, "STRING", bit_name)) {
+            fprintf(stderr, "Error: BIT requires name\n");
+            lexer_free(lex);
+            return 0;
+        }
+        
+        lexer_skip_whitespace(lex);
+        if (!lexer_match(lex, "{", temp)) {
+            fprintf(stderr, "Error: Expected '{' after BIT name\n");
+            lexer_free(lex);
+            return 0;
+        }
+        
+        /* Parse bit body - everything until closing brace */
+        char bit_body[MAX_BIT_BODY] = {0};
+        int body_len = 0;
+        int brace_count = 1;
+        
+        while (lex->pos < lex->length && brace_count > 0 && body_len < MAX_BIT_BODY - 1) {
+            if (lex->data[lex->pos] == '{') brace_count++;
+            else if (lex->data[lex->pos] == '}') brace_count--;
+            
+            if (brace_count > 0) {
+                bit_body[body_len++] = lex->data[lex->pos];
+            }
+            lex->pos++;
+        }
+        bit_body[body_len] = '\0';
+        
+        /* Store bit */
+        if (prog->bit_count < MAX_BITS) {
+            strcpy(prog->bits[prog->bit_count].name, bit_name);
+            strcpy(prog->bits[prog->bit_count].body, bit_body);
+            prog->bit_count++;
+        }
     }
     
     /* Parse server block */
@@ -437,7 +558,10 @@ void handle_client(int client_fd) {
     /* Check routes */
     for (int i = 0; i < g_program->route_count; i++) {
         if (strcmp(g_program->routes[i].path, path) == 0) {
-            send_http_response(client_fd, g_program->routes[i].status, g_program->routes[i].body);
+            /* Expand bits in route body */
+            char expanded_body[MAX_RESPONSE_BODY] = {0};
+            expand_bits(g_program->routes[i].body, expanded_body, sizeof(expanded_body));
+            send_http_response(client_fd, g_program->routes[i].status, expanded_body);
             close(client_fd);
             return;
         }
