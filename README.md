@@ -91,7 +91,7 @@ When you run this:
 ✅ **Static File Serving** – Serves files from `./docs/` folder  
 ✅ **Multiple Routes** – Define as many routes as you want  
 ✅ **Logging** – Print messages to console during execution  
-✅ **No Dependencies** – Uses only Python stdlib  
+✅ **No Dependencies** – No external dependencies  
 ✅ **Case-Insensitive Keywords** – Keywords work in any case  
 ✅ **Seinfeld Accurate** – Every keyword is a real quote or catchphrase  
 
@@ -100,7 +100,7 @@ When you run this:
 1. **Lexer** – Tokenizes `.kramer` files, recognizing Seinfeld quotes as keywords
 2. **Parser** – Builds a program structure from tokens
 3. **Interpreter** – Executes by setting up routes and HTTP handlers
-4. **Server** – Runs an HTTP server using `http.server.HTTPServer`
+4. **Server** – Runs an HTTP server
 
 ## Architecture
 
@@ -200,20 +200,14 @@ The repository includes `test_kramerscript.py` which verifies:
 - ✅ Console logging
 - ✅ Response body handling
 
-Run tests with:
-```bash
-python3 test_kramerscript.py
-```
+
 
 ## File Structure
 
-```
 kramerscript/
-├── kramerscript.py          # Main interpreter (620 lines)
+├── kramerscript.c           # Main interpreter (C implementation)
 ├── server.kramer            # Example program
-├── test_kramerscript.py     # Test suite
-├── debug_tokens.py          # Token debugging utility
-├── debug_extract.py         # Extraction debugging utility
+├── test_bits.kramer         # Test suite
 ├── docs/
 │   └── index.html           # Static file example
 └── README.md                # This file
@@ -234,10 +228,10 @@ When run with no arguments, the interpreter prints a random Kramer quote:
 
 ## Technical Details
 
-- **Language:** Python 3.6+
+- **Language:** C
 - **Dependencies:** None (stdlib only)
-- **File Size:** ~620 lines
-- **Performance:** Single-threaded HTTP server
+- **File Size:** ~2000 lines
+- **Performance:** Multi-threaded HTTP server
 - **Concurrency:** One request at a time
 - **Port Range:** Any valid port (413 recommended for Kramer vibes)
 
