@@ -34,6 +34,11 @@
 #define MAX_BITS 64
 #define MAX_BIT_NAME 64
 #define MAX_BIT_BODY 2048
+#define MAX_BIT_PARAMS 8
+
+#define MAX_VARS 128
+#define MAX_VAR_NAME 64
+#define MAX_VAR_VALUE 2048
 
 /* Token types */
 typedef enum {
@@ -63,7 +68,17 @@ typedef struct {
 typedef struct {
     char name[MAX_BIT_NAME];
     char body[MAX_BIT_BODY];
+    char params[MAX_BIT_PARAMS][MAX_BIT_NAME];
+    char param_types[MAX_BIT_PARAMS][MAX_BIT_NAME];
+    int param_count;
 } Bit;
+
+typedef struct {
+    char name[MAX_VAR_NAME];
+    char value[MAX_VAR_VALUE];
+    char type[MAX_VAR_NAME];
+    int is_mut;
+} Var;
 
 typedef struct {
     char host[256];
@@ -72,6 +87,9 @@ typedef struct {
     int route_count;
     Bit bits[MAX_BITS];
     int bit_count;
+    Var vars[MAX_VARS];
+    int var_count;
+
     char logs[MAX_LOG_MESSAGES][MAX_LOG_LENGTH];
     int log_count;
 } Program;
@@ -149,6 +167,66 @@ const char *get_bit(const char *name) {
     return NULL;
 }
 
+const char *get_variable(const char *name) {
+    if (!g_program) return NULL;
+    for (int i = 0; i < g_program->var_count; i++) {
+        if (strcmp(g_program->vars[i].name, name) == 0) {
+            return g_program->vars[i].value;
+        }
+    }
+    return NULL;
+}
+
+int set_variable(const char *name, const char *value, int is_mut, const char *ann_type) {
+    if (!g_program) return 0;
+    for (int i = 0; i < g_program->var_count; i++) {
+        if (strcmp(g_program->vars[i].name, name) == 0) {
+            if (!g_program->vars[i].is_mut) {
+                fprintf(stderr, "Error: variable '%s' is immutable\n", name);
+                return 0;
+            }
+            /* type check existing var */
+            const char *existing_type = g_program->vars[i].type;
+            const char *value_type = NULL;
+            if (isdigit((unsigned char)value[0])) value_type = "int"; else value_type = "str";
+            if (existing_type[0] != '\0' && strcmp(existing_type, value_type) != 0) {
+                fprintf(stderr, "Error: assigning value of type '%s' to variable '%s' of type '%s'\n", value_type, name, existing_type);
+                return 0;
+            }
+            strncpy(g_program->vars[i].value, value, MAX_VAR_VALUE);
+            g_program->vars[i].value[MAX_VAR_VALUE-1] = '\0';
+            return 1;
+        }
+    }
+    if (g_program->var_count < MAX_VARS) {
+        strncpy(g_program->vars[g_program->var_count].name, name, MAX_VAR_NAME);
+        g_program->vars[g_program->var_count].name[MAX_VAR_NAME-1] = '\0';
+        strncpy(g_program->vars[g_program->var_count].value, value, MAX_VAR_VALUE);
+        g_program->vars[g_program->var_count].value[MAX_VAR_VALUE-1] = '\0';
+        g_program->vars[g_program->var_count].is_mut = is_mut;
+        /* determine type: annotation wins, otherwise infer */
+        if (ann_type && ann_type[0] != '\0') {
+            strncpy(g_program->vars[g_program->var_count].type, ann_type, MAX_VAR_NAME);
+            g_program->vars[g_program->var_count].type[MAX_VAR_NAME-1] = '\0';
+            /* basic validation */
+            const char *value_type = isdigit((unsigned char)value[0]) ? "int" : "str";
+            if (strcmp(ann_type, value_type) != 0) {
+                fprintf(stderr, "Error: annotated type '%s' does not match assigned literal type '%s' for variable '%s'\n", ann_type, value_type, name);
+                return 0;
+            }
+        } else {
+            /* infer */
+            const char *value_type = isdigit((unsigned char)value[0]) ? "int" : "str";
+            strncpy(g_program->vars[g_program->var_count].type, value_type, MAX_VAR_NAME);
+            g_program->vars[g_program->var_count].type[MAX_VAR_NAME-1] = '\0';
+        }
+        g_program->var_count++;
+        return 1;
+    }
+    fprintf(stderr, "Error: too many variables\n");
+    return 0;
+}
+
 /* Expand bit calls in response body */
 void expand_bits(char *input, char *output, size_t out_size) {
     size_t in_pos = 0;
@@ -174,15 +252,27 @@ void expand_bits(char *input, char *output, size_t out_size) {
                     strncpy(bit_name, input + bit_start, name_len);
                     bit_name[name_len] = '\0';
                     
-                    /* Get bit content */
-                    const char *bit_content = get_bit(bit_name);
-                    if (bit_content) {
-                        size_t content_len = strlen(bit_content);
-                        if (out_pos + content_len < out_size - 1) {
-                            strcpy(output + out_pos, bit_content);
-                            out_pos += content_len;
+                        /* Get variable or bit content */
+                        const char *var_content = get_variable(bit_name);
+                        if (var_content) {
+                            size_t content_len = strlen(var_content);
+                            if (out_pos + content_len < out_size - 1) {
+                                strcpy(output + out_pos, var_content);
+                                out_pos += content_len;
+                            }
+                        } else {
+                            const char *bit_content = get_bit(bit_name);
+                            if (bit_content) {
+                                /* expand nested templates inside the bit body */
+                                char nested[MAX_BIT_BODY] = {0};
+                                expand_bits((char *)bit_content, nested, sizeof(nested));
+                                size_t content_len = strlen(nested);
+                                if (out_pos + content_len < out_size - 1) {
+                                    strcpy(output + out_pos, nested);
+                                    out_pos += content_len;
+                                }
+                            }
                         }
-                    }
                     
                     in_pos = bit_pos + 2;
                     continue;
@@ -268,6 +358,20 @@ int lexer_match_pattern(Lexer *lex, const char *pattern_desc, char *output) {
         output[len] = '\0';
         return len > 0;
     }
+
+    if (strcmp(pattern_desc, "IDENT") == 0) {
+        int len = 0;
+        /* Ident must start with letter or underscore */
+        if (lex->pos < lex->length && (isalpha((unsigned char)lex->data[lex->pos]) || lex->data[lex->pos] == '_')) {
+            output[len++] = lex->data[lex->pos++];
+            while (lex->pos < lex->length && (isalnum((unsigned char)lex->data[lex->pos]) || lex->data[lex->pos] == '_') && len < TOKEN_VALUE_LEN - 1) {
+                output[len++] = lex->data[lex->pos++];
+            }
+            output[len] = '\0';
+            return 1;
+        }
+        return 0;
+    }
     
     return 0;
 }
@@ -339,12 +443,72 @@ int parse_program(const char *source, Program *prog) {
         
         lexer_skip_whitespace(lex);
         char bit_name[MAX_BIT_NAME];
-        if (!lexer_match_pattern(lex, "STRING", bit_name)) {
-            fprintf(stderr, "Error: BIT requires name\n");
-            lexer_free(lex);
-            return 0;
+        /* Support identifier-style BIT names: bit salad(lettuce: str) { ... } */
+        if (!lexer_match_pattern(lex, "IDENT", bit_name)) {
+            /* fall back to quoted string name */
+            if (!lexer_match_pattern(lex, "STRING", bit_name)) {
+                fprintf(stderr, "Error: BIT requires name\n");
+                lexer_free(lex);
+                return 0;
+            }
         }
         
+        lexer_skip_whitespace(lex);
+
+        /* Parse optional parameter list: (name: type, ...) */
+        char param_name[MAX_BIT_NAME];
+        char param_type[MAX_BIT_NAME];
+        char bit_params[MAX_BIT_PARAMS][MAX_BIT_NAME];
+        char bit_param_types[MAX_BIT_PARAMS][MAX_BIT_NAME];
+        int param_count = 0;
+
+        if (lex->pos < lex->length && lex->data[lex->pos] == '(') {
+            lex->pos++; /* skip '(' */
+            lexer_skip_whitespace(lex);
+            while (lex->pos < lex->length && lex->data[lex->pos] != ')' && param_count < MAX_BIT_PARAMS) {
+                if (!lexer_match_pattern(lex, "IDENT", param_name)) {
+                    fprintf(stderr, "Error: Expected parameter name in BIT '%s'\n", bit_name);
+                    lexer_free(lex);
+                    return 0;
+                }
+                strncpy(bit_params[param_count], param_name, MAX_BIT_NAME);
+                bit_params[param_count][MAX_BIT_NAME-1] = '\0';
+                lexer_skip_whitespace(lex);
+                /* optional :type */
+                if (lex->pos < lex->length && lex->data[lex->pos] == ':') {
+                    lex->pos++;
+                    lexer_skip_whitespace(lex);
+                    if (!lexer_match_pattern(lex, "IDENT", param_type)) {
+                        fprintf(stderr, "Error: Expected type for parameter '%s' in BIT '%s'\n", param_name, bit_name);
+                        lexer_free(lex);
+                        return 0;
+                    }
+                    /* validate basic supported types */
+                    if (strcmp(param_type, "str") != 0 && strcmp(param_type, "int") != 0) {
+                        fprintf(stderr, "Error: unsupported type '%s' for parameter '%s' in BIT '%s'\n", param_type, param_name, bit_name);
+                        lexer_free(lex);
+                        return 0;
+                    }
+                    strncpy(bit_param_types[param_count], param_type, MAX_BIT_NAME);
+                    bit_param_types[param_count][MAX_BIT_NAME-1] = '\0';
+                } else {
+                    bit_param_types[param_count][0] = '\0';
+                }
+                param_count++;
+                lexer_skip_whitespace(lex);
+                if (lex->pos < lex->length && lex->data[lex->pos] == ',') {
+                    lex->pos++; lexer_skip_whitespace(lex);
+                    continue;
+                }
+            }
+            if (lex->pos < lex->length && lex->data[lex->pos] == ')') lex->pos++;
+            else {
+                fprintf(stderr, "Error: Expected ')' after parameter list in BIT '%s'\n", bit_name);
+                lexer_free(lex);
+                return 0;
+            }
+        }
+
         lexer_skip_whitespace(lex);
         if (!lexer_match(lex, "{", temp)) {
             fprintf(stderr, "Error: Expected '{' after BIT name\n");
@@ -372,10 +536,81 @@ int parse_program(const char *source, Program *prog) {
         if (prog->bit_count < MAX_BITS) {
             strcpy(prog->bits[prog->bit_count].name, bit_name);
             strcpy(prog->bits[prog->bit_count].body, bit_body);
+            prog->bits[prog->bit_count].param_count = param_count;
+            for (int pi = 0; pi < param_count; pi++) {
+                strncpy(prog->bits[prog->bit_count].params[pi], bit_params[pi], MAX_BIT_NAME);
+                prog->bits[prog->bit_count].params[pi][MAX_BIT_NAME-1] = '\0';
+                strncpy(prog->bits[prog->bit_count].param_types[pi], bit_param_types[pi], MAX_BIT_NAME);
+                prog->bits[prog->bit_count].param_types[pi][MAX_BIT_NAME-1] = '\0';
+            }
             prog->bit_count++;
         }
     }
     
+    /* Parse variable declarations (Rust-like: let / let mut) */
+    while (lex->pos < lex->length) {
+        lexer_skip_whitespace(lex);
+        size_t _saved = lex->pos;
+        if (!lexer_match(lex, "LET", temp)) {
+            lex->pos = _saved;
+            break;
+        }
+
+        lexer_skip_whitespace(lex);
+        int is_mut = 0;
+        /* optional 'mut' */
+        if (lexer_match(lex, "MUT", temp)) {
+            is_mut = 1;
+            lexer_skip_whitespace(lex);
+        }
+
+        char var_name[MAX_VAR_NAME];
+        if (!lexer_match_pattern(lex, "IDENT", var_name)) {
+            fprintf(stderr, "Error: expected identifier after 'let'\n");
+            lexer_free(lex);
+            return 0;
+        }
+
+        lexer_skip_whitespace(lex);
+        /* expect '=' */
+        if (lex->pos >= lex->length || lex->data[lex->pos] != '=') {
+            fprintf(stderr, "Error: expected '=' after variable name '%s'\n", var_name);
+            lexer_free(lex);
+            return 0;
+        }
+        lex->pos++;
+        lexer_skip_whitespace(lex);
+
+        char ann_type[MAX_VAR_NAME] = {0};
+        /* optional type annotation: : type */
+        lexer_skip_whitespace(lex);
+        if (lex->pos < lex->length && lex->data[lex->pos] == ':') {
+            lex->pos++; lexer_skip_whitespace(lex);
+            if (!lexer_match_pattern(lex, "IDENT", ann_type)) {
+                fprintf(stderr, "Error: expected type after ':' for variable '%s'\n", var_name);
+                lexer_free(lex);
+                return 0;
+            }
+            lexer_skip_whitespace(lex);
+        }
+
+        char var_value[MAX_VAR_VALUE] = {0};
+        if (lexer_match_pattern(lex, "STRING", var_value) || lexer_match_pattern(lex, "NUMBER", var_value)) {
+            /* ok */
+        } else {
+            fprintf(stderr, "Error: expected string or number as variable value for '%s'\n", var_name);
+            lexer_free(lex);
+            return 0;
+        }
+
+        if (!set_variable(var_name, var_value, is_mut, ann_type)) {
+            lexer_free(lex);
+            return 0;
+        }
+        lexer_skip_whitespace(lex);
+        /* optional semicolon or newline - just continue */
+    }
+
     /* Parse server block */
     lexer_skip_whitespace(lex);
     if (lexer_match(lex, "SERVER", temp)) {

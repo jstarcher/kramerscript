@@ -1,0 +1,44 @@
+YO JERRY!
+
+# Example server showing typed bits and Rust-like variables
+
+# Define a reusable template (bit) with typed params
+bit salad(lettuce: str, tomato: str) {
+    "Tossing a salad with {{lettuce}} and {{tomato}}"
+}
+
+# Variables (Rust-like)
+let lettuce: str = "romaine"
+let mut tomato: str = "heirloom"
+
+# Route uses the bit; bit body references variables by name
+SERVER "0.0.0.0:8080" {
+    ROUTE "/" {
+        SERVE 200 "{{salad}}"
+    }
+
+    ROUTE "/quick" {
+        # change the mutable tomato variable at parse time (allowed)
+        let mut tomato: str = "cherry"
+        SERVE 200 "Quick: {{salad}}"
+    }
+}
+
+# Another bit demonstrating int type
+bit counter(start: int) {
+    "Counter starts at {{start}}"
+}
+let start: int = 5
+
+# Serve counter
+SERVER "127.0.0.1:8081" {
+    ROUTE "/count" {
+        SERVE 200 "{{counter}}"
+    }
+}
+
+# Note: annotated types are checked at parse time; assigning wrong literal types
+# will produce an error. For example the following would fail (commented out):
+# let bad: int = "not-a-number"
+
+NOINE!
