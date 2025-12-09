@@ -677,6 +677,11 @@ int main(int argc, char *argv[]) {
         printf("%s\n", g_program->logs[i]);
     }
     
+    /* Debug: print server config */
+    if (g_program) {
+        fprintf(stderr, "DEBUG: server host='%s' port=%d\n", g_program->host, g_program->port);
+    }
+
     /* Start server if configured */
     if (g_program->port > 0) {
         signal(SIGINT, signal_handler);

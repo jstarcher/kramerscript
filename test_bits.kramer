@@ -1,0 +1,22 @@
+YO JERRY!
+
+BIT "greeting" {
+Hello from the bit!
+}
+
+BIT "footer" {
+---
+Kramer was here.
+}
+
+SERVER "localhost:8888" {
+    ROUTE "/" {
+        SERVE 200 "Welcome! {{greeting}} {{footer}}"
+    }
+    
+    ROUTE "/about" {
+        SERVE 200 "About us: {{greeting}}"
+    }
+}
+
+NOINE!

@@ -83,6 +83,7 @@ When you run this:
 | `"quote" LOG` | Print to console |
 | `SLIDE_IN` | Async context (flavor only) |
 | `GIDDYUP!` | Return/exit (reserved for future) |
+| `BIT "name" { ... }` | Define a reusable "bit" (function-like block) |
 
 ## Key Features
 
@@ -167,6 +168,28 @@ SERVER "127.0.0.1:3000" {
 NOINE!
 ```
 
+### 5. Functions ("bits")
+```kramer
+YO JERRY!
+
+BIT "greeting" {
+Hello from the bit!
+}
+
+BIT "footer" {
+---
+The End.
+}
+
+SERVER "127.0.0.1:9413" {
+    ROUTE "/" {
+        SERVE 200 "Welcome! {{greeting}} {{footer}}"
+    }
+}
+
+NOINE!
+```
+
 ## Testing
 
 The repository includes `test_kramerscript.py` which verifies:
@@ -221,7 +244,7 @@ When run with no arguments, the interpreter prints a random Kramer quote:
 ## Limitations
 
 ❌ No variables  
-❌ No functions  
+✅ Functions ("bits") — reusable blocks you can insert in responses  
 ❌ No loops  
 ❌ No conditionals  
 ❌ No type system  

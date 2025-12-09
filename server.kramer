@@ -1,8 +1,16 @@
 YO JERRY!
+BIT "greeting" {
+Welcome to KramerScript — have a nice nothing-filled day!
+}
+
+BIT "footer" {
+---
+Kramer was here.
+}
 
 SERVER "127.0.0.1:9413" {
     ROUTE "/" {
-        SERVE 200 "I'm out there Jerry and I'm loving every minute of it!"
+        SERVE 200 "I'm out there Jerry and I'm loving every minute of it! {{greeting}} {{footer}}"
     }
     
     ROUTE "/health" {
